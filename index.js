@@ -19,13 +19,13 @@ if (fs.existsSync(DB_FILE)) {
 
 let criacaoEtapa = {};
 
-// Configuração cirúrgica para o Puppeteer encontrar o Chrome no Linux do Render
+// Configuração definitiva para o Puppeteer encontrar o Chrome baixado no Render
 const client = new Client({
     authStrategy: new LocalAuth({
         dataPath: "./.wwebjs_auth"
     }),
     puppeteer: { 
-        executablePath: '/opt/render/.cache/puppeteer/chrome/linux-130.0.6723.116/chrome-linux64/chrome',
+        executablePath: '/opt/render/.cache/puppeteer/chrome/linux-130.0.6723.116/chrome-linux/chrome',
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox', 
@@ -101,7 +101,7 @@ client.on('message', async msg => {
             const resposta = await axios.get(urlBusca);
             
             if (resposta.data && resposta.data.data.length > 0) {
-                const gifUrl = reply.data.data[0].images.fixed_height.url;
+                const gifUrl = resposta.data.data.images.fixed_height.url;
                 const midiaGif = await MessageMedia.fromUrl(gifUrl, { unsafeMime: true });
                 await client.sendMessage(chatID, midiaGif, { sendMediaAsSticker: true });
             }
