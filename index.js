@@ -1,113 +1,104 @@
-const { Client: ClientWA, RemoteAuth, MessageMedia } = require('whatsapp-web.js');
-const { Telegraf } = require('telegraf');
-const { Client: ClientDC, GatewayIntentBits } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
-const ytdl = require('ytdl-core');
-const express = require('express');
-const fs = require('fs');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
+const fs = require('fs');
+const express = require('express');
+const axios = require('axios'); // Para buscar memes na internet
 
 // --- SERVER CENTRAL PARA MANTER ALIVE (RENDER) ---
 const app = express();
+const port = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('🎧 DJ Azeitona Multi-Redes está estourando os alto-falantes!'));
-app.listen(process.env.PORT || 3000, () => console.log("Servidor Web Ativo"));
+app.listen(port, () => console.log(`Servidor rodando na porta ${port}`));
 
 // --- BANCO DE DADOS DE COMBOS LOCAL ---
 const DB_FILE = './combos_db.json';
 let combosDatabase = {};
-if (fs.existsSync(DB_FILE)) combosDatabase = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
+if (fs.existsSync(DB_FILE)) {
+    combosDatabase = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
+}
 
-// --- CONFIGURAÇÃO DOS TOKENS DAS REDES (VARIÁVEIS DE AMBIENTE) ---
+let criacaoEtapa = {};
+
+// Ajustado para LocalAuth para funcionar 100% no plano grátis do Render sem erro de banco externo
+const client = new Client({
+    authStrategy: new LocalAuth({
+        dataPath: "./.wwebjs_auth"
+    }),
+    puppeteer: { 
+        args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+    }
+});
+
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || '';
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || '';
 
-// --- INTERFACE 1: WHATSAPP ---
-const whatsapp = new ClientWA({
-    authStrategy: new RemoteAuth({ clientId: "dj-azeitona", dataPath: "./.wwebjs_auth", backupSyncIntervalMs: 60000 }),
-    puppeteer: { args: ['--no-sandbox', '--disable-setuid-sandbox'] }
+client.on('qr', qr => {
+    // Imprime o QR Code nos logs do Render para você poder escanear
+    qrcode.generate(qr, { small: true });
 });
-whatsapp.on('qr', qr => qrcode.generate(qr, { small: true }));
-whatsapp.on('ready', () => console.log('🟢 DJ Azeitona conectado no WhatsApp!'));
-whatsapp.on('message', async msg => {
-    if (msg.body.startsWith('@')) {
-        const comando = msg.body.replace('@', '').trim().toLowerCase();
-        if (combosDatabase[comando]) {
-            const c = combosDatabase[comando];
-            await whatsapp.sendMessage(msg.from, new MessageMedia(c.sticker.mimetype, c.sticker.data), { sendMediaAsSticker: true });
-            await whatsapp.sendMessage(msg.from, new MessageMedia(c.audio.mimetype, c.audio.data), { sendAudioAsVoice: true });
+
+client.on('ready', () => console.log('🎧 DJ AZEITONA CONECTADO NA NUVEM!'));
+
+client.on('message', async msg => {
+    const chatID = msg.from;
+    const texto = msg.body.trim();
+    const textoMinusculo = texto.toLowerCase();
+
+    // --- MODO DE CRIAÇÃO ---
+    if (textoMinusculo.startsWith('!criarcombo ')) {
+        const nomeCombo = texto.replace(/!criarcombo /i, '').trim().toLowerCase();
+        criacaoEtapa[chatID] = { nome: nomeCombo, passo: 'aguardando_sticker', stickerMedia: null, audioMedia: null };
+        await msg.reply(`🎧 *[DJ Azeitona]*\n\nCriando o combo *@${nomeCombo}*.\n👉 Encaminhe a *FIGURINHA* para mim.`);
+        return;
+    }
+
+    if (criacaoEtapa[chatID]) {
+        const etapa = criacaoEtapa[chatID];
+        if (etapa.passo === 'aguardando_sticker' && msg.hasMedia && msg.type === 'sticker') {
+            etapa.stickerMedia = await msg.downloadMedia();
+            etapa.passo = 'aguardando_audio';
+            await msg.reply('🟢 Figurinha salva! 👉 Agora encaminhe o *ÁUDIO*.');
+            return;
+        }
+        if (etapa.passo === 'aguardando_audio' && msg.hasMedia && (msg.type === 'audio' || msg.type === 'ptt')) {
+            etapa.audioMedia = await msg.downloadMedia();
+            combosDatabase[etapa.nome] = {
+                sticker: { data: etapa.stickerMedia.data, mimetype: etapa.stickerMedia.mimetype },
+                audio: { data: etapa.audioMedia.data, mimetype: etapa.audioMedia.mimetype }
+            };
+            fs.writeFileSync(DB_FILE, JSON.stringify(combosDatabase, null, 2));
+            await msg.reply(`🎉 Combo *@${etapa.nome}* gravado com sucesso no CD do DJ Azeitona!`);
+            delete criacaoEtapa[chatID];
+            return;
+        }
+    }
+
+    // --- MODO DE USO NO GRUPO (Disparado por @) ---
+    if (texto.startsWith('@')) {
+        const nomeAlvo = texto.replace('@', '').trim().toLowerCase();
+
+        // 1. Verifica se o combo existe no seu banco de dados privado
+        if (combosDatabase[nomeAlvo]) {
+            const combo = combosDatabase[nomeAlvo];
+            await client.sendMessage(chatID, new MessageMedia(combo.sticker.mimetype, combo.sticker.data), { sendMediaAsSticker: true });
+            await client.sendMessage(chatID, new MessageMedia(combo.audio.mimetype, combo.audio.data), { sendAudioAsVoice: true });
+            return;
+        }
+
+        // 2. Se NÃO existir, busca um GIF de meme/anime na internet automaticamente
+        try {
+            const urlBusca = `https://giphy.com{encodeURIComponent(nomeAlvo)}&limit=1&rating=g`;
+            const resposta = await axios.get(urlBusca);
+            
+            if (resposta.data && resposta.data.data.length > 0) {
+                const gifUrl = resposta.data.data[0].images.fixed_height.url;
+                const midiaGif = await MessageMedia.fromUrl(gifUrl, { unsafeMime: true });
+                await client.sendMessage(chatID, midiaGif, { sendMediaAsSticker: true });
+            }
+        } catch (err) {
+            console.log("Erro ao buscar na internet:", err.message);
         }
     }
 });
-whatsapp.initialize();
 
-// --- INTERFACE 2: TELEGRAM ---
-if (TELEGRAM_TOKEN) {
-    const botTelegram = new Telegraf(TELEGRAM_TOKEN);
-    console.log('🔵 DJ Azeitona configurado para o Telegram!');
-    
-    botTelegram.on('text', async (ctx) => {
-        const texto = ctx.message.text;
-        if (texto.startsWith('@')) {
-            const comando = texto.replace('@', '').trim().toLowerCase();
-            if (combosDatabase[comando]) {
-                const c = combosDatabase[comando];
-                // Telegram aceita buffers diretamente para Stickers e Áudios (Voz)
-                const stickerBuffer = Buffer.from(c.sticker.data, 'base64');
-                const voiceBuffer = Buffer.from(c.audio.data, 'base64');
-                await ctx.replyWithSticker({ source: stickerBuffer });
-                await ctx.replyWithVoice({ source: voiceBuffer });
-            }
-        }
-    });
-    botTelegram.launch();
-}
-
-// --- INTERFACE 3: DISCORD (STIKERS + PLAY DE MÚSICA EM CALL) ---
-if (DISCORD_TOKEN) {
-    const discord = new ClientDC({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildVoiceStates] });
-    
-    discord.on('ready', () => console.log('🟣 DJ Azeitona logado no Discord!'));
-    
-    discord.on('messageCreate', async message => {
-        if (message.author.bot) return;
-        const texto = message.content;
-
-        // Comandos de figurinha/áudio no chat do Discord
-        if (texto.startsWith('@')) {
-            const comando = texto.replace('@', '').trim().toLowerCase();
-            if (combosDatabase[comando]) {
-                const c = combosDatabase[comando];
-                const voiceBuffer = Buffer.from(c.audio.data, 'base64');
-                // Envia o áudio como arquivo no chat do Discord
-                await message.reply({ content: `🎵 Tocando a vinheta de *@${comando}*!`, files: [{ attachment: voiceBuffer, name: 'audio.mp3' }] });
-            }
-        }
-
-        // COMANDO DE MÚSICA DO YOUTUBE NA CALL DO DISCORD: !play <link ou nome>
-        if (texto.startsWith('!play ')) {
-            const busca = texto.replace('!play ', '').trim();
-            const channel = message.member.voice.channel;
-            
-            if (!channel) return message.reply('❌ Entra num canal de voz primeiro, chefe!');
-            
-            try {
-                const connection = joinVoiceChannel({ channelId: channel.id, guildId: channel.guild.id, adapterCreator: channel.guild.voiceAdapterCreator });
-                message.reply(`🎧 Procurando e soltando o som de: *${busca}* na call!`);
-
-                // Extrai ou busca o streaming de áudio do YouTube usando ytdl
-                const stream = ytdl(busca, { filter: 'audioonly', highWaterMark: 1 << 25 });
-                const resource = createAudioResource(stream);
-                const player = createAudioPlayer();
-
-                player.play(resource);
-                connection.subscribe(player);
-
-                player.on(AudioPlayerStatus.Idle, () => connection.destroy());
-            } catch (error) {
-                console.error(error);
-                message.reply('⚠️ Ocorreu um erro ao sintonizar essa música.');
-            }
-        }
-    });
-    discord.login(DISCORD_TOKEN);
-}
+client.initialize();
