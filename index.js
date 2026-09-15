@@ -19,13 +19,23 @@ if (fs.existsSync(DB_FILE)) {
 
 let criacaoEtapa = {};
 
-// Ajustado para LocalAuth para funcionar 100% no plano grátis do Render sem erro de banco externo
+// Configuração cirúrgica para o Puppeteer encontrar o Chrome no Linux do Render
 const client = new Client({
     authStrategy: new LocalAuth({
         dataPath: "./.wwebjs_auth"
     }),
     puppeteer: { 
-        args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+        executablePath: '/opt/render/.cache/puppeteer/chrome/linux-130.0.6723.116/chrome-linux64/chrome',
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox', 
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu'
+        ] 
     }
 });
 
@@ -33,7 +43,7 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || '';
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || '';
 
 client.on('qr', qr => {
-    // Imprime o QR Code nos logs do Render para você poder escanear
+    // Desenha o código nos logs do painel do Render
     qrcode.generate(qr, { small: true });
 });
 
@@ -91,7 +101,7 @@ client.on('message', async msg => {
             const resposta = await axios.get(urlBusca);
             
             if (resposta.data && resposta.data.data.length > 0) {
-                const gifUrl = resposta.data.data[0].images.fixed_height.url;
+                const gifUrl = reply.data.data[0].images.fixed_height.url;
                 const midiaGif = await MessageMedia.fromUrl(gifUrl, { unsafeMime: true });
                 await client.sendMessage(chatID, midiaGif, { sendMediaAsSticker: true });
             }
