@@ -19,18 +19,17 @@ if (fs.existsSync(DB_FILE)) {
 
 let criacaoEtapa = {};
 
-// Função inteligente que encontra o Chrome automaticamente nas pastas do Render
+// Função inteligente que encontra o Chrome instalado pelo Buildpack no Linux do Render
 function localizarChrome() {
     const caminhosPossiveis = [
-        '/opt/render/.cache/puppeteer/chrome/linux-130.0.6723.116/chrome-linux/chrome',
-        '/opt/render/.cache/puppeteer/chrome/linux-130.0.6723.116/chrome-linux64/chrome',
+        '/usr/bin/google-chrome-stable',
         '/usr/bin/google-chrome',
         '/usr/bin/chromium'
     ];
     for (const caminho of caminhosPossiveis) {
         if (fs.existsSync(caminho)) return caminho;
     }
-    return null; // O Puppeteer tentará o padrão se não achar nenhum
+    return null;
 }
 
 const client = new Client({
