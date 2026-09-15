@@ -19,13 +19,26 @@ if (fs.existsSync(DB_FILE)) {
 
 let criacaoEtapa = {};
 
-// Configuração definitiva para o Puppeteer encontrar o Chrome baixado no Render
+// Função inteligente que encontra o Chrome automaticamente nas pastas do Render
+function localizarChrome() {
+    const caminhosPossiveis = [
+        '/opt/render/.cache/puppeteer/chrome/linux-130.0.6723.116/chrome-linux/chrome',
+        '/opt/render/.cache/puppeteer/chrome/linux-130.0.6723.116/chrome-linux64/chrome',
+        '/usr/bin/google-chrome',
+        '/usr/bin/chromium'
+    ];
+    for (const caminho of caminhosPossiveis) {
+        if (fs.existsSync(caminho)) return caminho;
+    }
+    return null; // O Puppeteer tentará o padrão se não achar nenhum
+}
+
 const client = new Client({
     authStrategy: new LocalAuth({
         dataPath: "./.wwebjs_auth"
     }),
     puppeteer: { 
-        executablePath: '/opt/render/.cache/puppeteer/chrome/linux-130.0.6723.116/chrome-linux/chrome',
+        executablePath: localizarChrome(),
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox', 
@@ -38,9 +51,6 @@ const client = new Client({
         ] 
     }
 });
-
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || '';
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN || '';
 
 client.on('qr', qr => {
     // Desenha o código nos logs do painel do Render
@@ -87,7 +97,6 @@ client.on('message', async msg => {
     if (texto.startsWith('@')) {
         const nomeAlvo = texto.replace('@', '').trim().toLowerCase();
 
-        // 1. Verifica se o combo existe no seu banco de dados privado
         if (combosDatabase[nomeAlvo]) {
             const combo = combosDatabase[nomeAlvo];
             await client.sendMessage(chatID, new MessageMedia(combo.sticker.mimetype, combo.sticker.data), { sendMediaAsSticker: true });
@@ -95,7 +104,6 @@ client.on('message', async msg => {
             return;
         }
 
-        // 2. Se NÃO existir, busca um GIF de meme/anime na internet automaticamente
         try {
             const urlBusca = `https://giphy.com{encodeURIComponent(nomeAlvo)}&limit=1&rating=g`;
             const resposta = await axios.get(urlBusca);
