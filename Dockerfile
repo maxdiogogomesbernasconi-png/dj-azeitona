@@ -1,34 +1,20 @@
-# Usa uma imagem oficial do Node.js com Linux estável
-FROM node:20-slim
+# Usa a imagem oficial do Puppeteer que já vem com Node.js e Chrome instalados de fábrica
+FROM ghcr.io/puppeteer/puppeteer:22.12.0
 
-# Instala o Google Chrome oficial e todas as dependências de sistema para rodar o Puppeteer
-RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
-    ca-certificates \
-    procps \
-    libxss1 \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libgtk-3-0 \
-    && wget -q -O - https://google.com | apt-key add - \
-    && sh -c 'echo "deb [arch=amd64] http://google.com stable main" >> /etc/apt/sources.list.d/google.list' \
-    && apt-get update \
-    && apt-get install -y google-chrome-stable --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
-
-# Cria a pasta do bot dentro do servidor virtual
+# Define a pasta do bot dentro do servidor virtual
 WORKDIR /usr/src/app
 
-# Copia as configurações de bibliotecas e instala
-COPY package*.json ./
-RUN npm install
+# Copia as configurações de bibliotecas e altera as permissões para o usuário padrão da imagem
+COPY --chown=puppeteer:puppeteer package*.json ./
 
-# Copia o código do DJ Azeitona
-COPY . .
+# Instala as bibliotecas de forma limpa
+RUN npm ci
 
-# Expõe a porta de internet para o Render
+# Copia o resto do código do DJ Azeitona
+COPY --chown=puppeteer:puppeteer . .
+
+# Expõe a porta de internet para o Render mandar o sinal
 EXPOSE 3000
 
-# Comando definitivo que liga o robô
+# Executa o bot usando o usuário seguro do Puppeteer
 CMD ["node", "index.js"]
